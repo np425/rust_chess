@@ -15,25 +15,9 @@ impl Path {
             y: self.to.y - self.from.y,
         }
     }
-}
 
-enum Player {
-    White,
-    Black,
-}
-
-enum Piece {
-    Knight(Player),
-    Bishop(Player),
-    Queen(Player),
-    Rook(Player),
-    King(Player),
-    Pawn(Player),
-}
-
-impl Piece {
-    fn is_path_clear(board: &[Option<Piece>; 64], path: &Path) -> bool {
-        let d = path.diff();
+    fn is_clear(&self, board: &[Square; 64]) -> bool {
+        let d = self.diff();
 
         if d.x.abs() != d.y.abs() {
             return false;
@@ -54,7 +38,7 @@ impl Piece {
             iter.y += incr.y;
 
             match board.get(iter.y * 8 + iter.x) {
-                Some(None) => true,
+                Some(Square::Empty) => true,
                 _ => return false
             }
         }
@@ -62,30 +46,49 @@ impl Piece {
         true
     }
 
-    fn can_move(&self, board: &[Option<Piece>; 64], path: &Path) -> bool {
+}
+
+
+enum Player {
+    White,
+    Black,
+}
+
+enum Square {
+    Knight(Player),
+    Bishop(Player),
+    Queen(Player),
+    Rook(Player),
+    King(Player),
+    Pawn(Player),
+    Empty
+}
+
+impl Square {
+    fn can_move(&self, board: &[Square; 64], path: &Path) -> bool {
         let d = path.diff();
-        if !Self::is_path_clear(board, path) {
+        if !path.is_clear(board) {
             return false
         }
 
         match self {
-            Piece::Rook(_) => {
+            Square::Rook(_) => {
                 d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0
             }
-            Piece::Bishop(_) => {
+            Square::Bishop(_) => {
                 d.x.abs() == d.y.abs() && d.x != 0
             }
-            Piece::Queen(_) => {
+            Square::Queen(_) => {
                 (d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0) || (d.x.abs() == d.y.abs() && d.x != 0)
             }
-            Piece::Knight(_) => {
+            Square::Knight(_) => {
                 d.x.abs() * d.y.abs() == 2
             }
-            Piece::King(_) => {
+            Square::King(_) => {
                 // TODO: implement checks, etc
                 true
             }
-            Piece::Pawn(player) => {
+            Square::Pawn(player) => {
                 let second_rank_y = match player {
                     Player::White => 1,
                     Player::Black => 6,
@@ -100,6 +103,7 @@ impl Piece {
                 // TODO: capturing
                 // TODO: en passant
             }
+            _ => false
         }
     }
 }
@@ -107,7 +111,7 @@ impl Piece {
 // TODO: FEN, PGN, Game Impl
 
 struct Position {
-    board: [Option<Piece>; 64],
+    board: [Square; 64],
 }
 
 fn main() {
