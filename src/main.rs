@@ -1,6 +1,7 @@
+#[derive(Clone, Copy)]
 struct Coord {
-    x: i8,
-    y: i8,
+    x: usize,
+    y: usize,
 }
 
 struct Path {
@@ -16,6 +17,7 @@ impl Path {
         }
     }
 
+    // TODO: take position, to not hardcore board size
     fn is_clear(&self, board: &[Square; 64]) -> bool {
         let d = self.diff();
 
@@ -45,13 +47,21 @@ impl Path {
 
         true
     }
-
 }
 
 
 enum Player {
     White,
     Black,
+}
+
+impl Player {
+    fn enemy(&self) -> Player {
+        match self {
+            Player::White => Player::Black,
+            Player::Black => Player::White
+        }
+    }
 }
 
 enum Square {
@@ -61,37 +71,54 @@ enum Square {
     Rook(Player),
     King(Player),
     Pawn(Player),
-    Empty
+    Empty,
 }
 
 impl Square {
-    fn can_move(&self, board: &[Square; 64], path: &Path) -> bool {
-        let d = path.diff();
-        if !path.is_clear(board) {
-            return false
+    fn player_ref(&self) -> Option<&Player> {
+        match self {
+            Square::Knight(player) => Some(player),
+            Square::Bishop(player) => Some(player),
+            Square::Queen(player) => Some(player),
+            Square::Rook(player) => Some(player),
+            Square::King(player) => Some(player),
+            Square::Pawn(player) => Some(player),
+            Square::Empty => None,
+        }
+    }
+
+    fn can_move(&self, pos: &Position, path: &Path) -> bool {
+        if !path.is_clear(&pos.board) {
+            return false;
         }
 
+        let d = path.diff();
+
+        // TODO: checks for current player
+        let no_checks = pos.checks.is_empty();
+
         match self {
+            // TODO: defending with pieces
             Square::Rook(_) => {
-                d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0
+                no_checks && d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0
             }
             Square::Bishop(_) => {
-                d.x.abs() == d.y.abs() && d.x != 0
+                no_checks && d.x.abs() == d.y.abs() && d.x != 0
             }
             Square::Queen(_) => {
-                (d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0) || (d.x.abs() == d.y.abs() && d.x != 0)
+                no_checks && (d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0) || (d.x.abs() == d.y.abs() && d.x != 0)
             }
             Square::Knight(_) => {
-                d.x.abs() * d.y.abs() == 2
+                no_checks && d.x.abs() * d.y.abs() == 2
             }
             Square::King(_) => {
                 // TODO: implement checks, etc
-                true
+                d.x.abs() <= 1 && d.y.abs() <= 1
             }
-            Square::Pawn(player) => {
+            Square::Pawn(_) => {
                 let second_rank_y = match player {
                     Player::White => 1,
-                    Player::Black => 6,
+                    Player::Black => pos.board.len() / 8 - 2,
                 };
 
                 let dir = match player {
@@ -112,6 +139,26 @@ impl Square {
 
 struct Position {
     board: [Square; 64],
+    king_pos: [Coord; 2],
+    checks: Vec<Coord>,
+    player: Player,
+}
+
+impl Position {
+    fn checks(&self, player: &Player) -> Option<&Vec<Coord>> {
+        (player == self.player).then_some(&self.checks)
+    }
+
+    fn is_square_defended(&self, coord: &Coord, by_player: Player) -> bool {
+        for (idx, square) in self.board.iter().enumerate() {
+            // TODO: refactor
+            // TODO: can attack
+            if *square.player_ref() == by_player && square.can_move(self, &Path { from: Coord { x: idx % 8, y: idx / 8 }, to: *coord }) {
+                return false;
+            }
+        }
+        false
+    }
 }
 
 fn main() {
