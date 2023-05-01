@@ -45,7 +45,7 @@ impl Square {
 
         for square in iter.take_while(|(coord, _)| coord != path.to) {
             if let Some(Square::Empty) = square {
-                return false
+                return false;
             }
         }
 
@@ -113,7 +113,6 @@ impl Square {
     }
 }
 
-
 struct Position {
     board: Board,
     king_pos: [Coord; 2],
@@ -128,12 +127,12 @@ impl Position {
 
     // TODO: Maybe extract it as a standalone function
     fn is_coord_defended(&self, coord: Coord, by_player: Player) -> bool {
-        for (target, square) in self.board.iter() {
+        for (target, square) in self.board.iter(Coord { x: 0, y: 0 }, (1, 1)) {
             let path = Path { from: coord, to: target };
 
             // TODO: can attack
             if *square.player_ref() == by_player && square.can_move(self, path) {
-                return true
+                return true;
             }
         }
         false
@@ -153,23 +152,7 @@ impl Board {
         self.board.get(Self::resolve_index(coord))
     }
 
-    pub fn iter(&self) -> BoardPathIter {
-        BoardPathIter {
-            board: self,
-            iter: Coord {x: 0, y: 0},
-            incr: (1,1),
-        }
-    }
-
-    pub fn iter_from(&self, from: Coord) -> BoardPathIter {
-        BoardPathIter {
-            board: self,
-            iter: from,
-            incr: (1,1)
-        }
-    }
-
-    pub fn iter_path(&self, from: Coord, incr: (isize, isize)) -> BoardPathIter {
+    pub fn iter(&self, from: Coord, incr: (isize, isize)) -> BoardPathIter {
         BoardPathIter {
             board: self,
             iter: from,
