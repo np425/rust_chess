@@ -63,7 +63,7 @@ pub struct Path {
 }
 
 impl Path {
-    pub fn diff(&self) -> Distance {
+    pub fn distance(&self) -> Distance {
         Distance {
             x: self.to.x as isize - self.from.x as isize,
             y: self.to.y as isize - self.from.y as isize

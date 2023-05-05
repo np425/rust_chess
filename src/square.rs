@@ -14,7 +14,7 @@ pub enum Square {
 
 impl Square {
     fn is_path_clear(board: &Board, path: Path) -> bool {
-        let d = path.diff();
+        let d = path.distance();
 
         if d.x.abs() != d.y.abs() {
             return false;
@@ -56,7 +56,7 @@ impl Square {
             return false;
         }
 
-        let d = path.diff();
+        let d = path.distance();
 
         let player = self.player().unwrap();
 
@@ -92,8 +92,49 @@ impl Square {
                     Player::Black => -1,
                 };
 
-                d.y == 1 * dir || second_rank_y == path.from.y && d.y == 2 * dir
-                // TODO: capturing
+                d.y == dir || second_rank_y == path.from.y && d.y == 2 * dir
+            }
+            _ => false
+        }
+    }
+
+    pub fn can_attack(&self, pos: &Position, path: Path) -> bool {
+        if !Self::is_path_clear(pos.board(), path) {
+            return false;
+        }
+
+        let d = path.distance();
+
+        let player = self.player().unwrap();
+
+        let no_checks = pos.checks(player)
+            .map_or(false, |checks| checks.is_empty());
+
+        match self {
+            // TODO: defending with pieces
+            Square::Rook(_) => {
+                no_checks && d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0
+            }
+            Square::Bishop(_) => {
+                no_checks && d.x.abs() == d.y.abs() && d.x != 0
+            }
+            Square::Queen(_) => {
+                no_checks && (d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0) || (d.x.abs() == d.y.abs() && d.x != 0)
+            }
+            Square::Knight(_) => {
+                no_checks && d.x.abs() * d.y.abs() == 2
+            }
+            Square::King(_) => {
+                // TODO: implement checks, etc
+                d.x.abs() <= 1 && d.y.abs() <= 1 && !pos.is_coord_defended(path.to, player.enemy())
+            }
+            Square::Pawn(_) => {
+                let dir = match player {
+                    Player::White => 1,
+                    Player::Black => -1,
+                };
+
+                d.y == dir && d.x == 1
                 // TODO: en passant
             }
             _ => false
