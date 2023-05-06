@@ -28,7 +28,9 @@ impl Square {
             y: if d.y > 0 { 1 } else { -1 },
         };
 
-        let iter = board.iter(path.from, incr);
+        let mut iter = board.iter();
+        iter.current = path.from;
+        iter.increment = incr;
 
         for (_, square) in iter.take_while(|(coord, _)| *coord != path.to) {
             if let Square::Empty = square {
@@ -51,6 +53,7 @@ impl Square {
         }
     }
 
+    // TODO: Simplify
     pub fn can_move(&self, pos: &Position, path: Path) -> bool {
         if !Self::is_path_clear(pos.board(), path) {
             return false;
@@ -139,5 +142,9 @@ impl Square {
             }
             _ => false
         }
+    }
+    
+    pub fn defends(&self, board: &Board, path: Path) -> bool {
+        true
     }
 }

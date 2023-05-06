@@ -13,11 +13,11 @@ impl Board {
         self.squares.get(Self::resolve_index(coord))
     }
 
-    pub fn iter(&self, from: Coord, incr: Distance) -> BoardPathIter {
+    pub fn iter(&self) -> BoardPathIter {
         BoardPathIter {
             board: self,
-            iter: from,
-            incr,
+            current: Coord {x: 0, y: 0},
+            increment: Distance {x: 1, y: 1},
         }
     }
 
@@ -32,18 +32,18 @@ impl Board {
 
 pub struct BoardPathIter<'a> {
     board: &'a Board,
-    iter: Coord,
-    incr: Distance,
+    pub current: Coord,
+    pub increment: Distance,
 }
 
 impl<'a> Iterator for BoardPathIter<'a> {
     type Item = (Coord, &'a Square);
 
     fn next(&mut self) -> Option<Self::Item> {
-        let result = (self.iter, self.board.get(self.iter)?);
+        let result = (self.current, self.board.get(self.current)?);
 
-        self.iter.x = (self.iter.x as isize + self.incr.x) as usize;
-        self.iter.y = (self.iter.y as isize + self.incr.x) as usize;
+        self.current.x = (self.current.x as isize + self.increment.x) as usize;
+        self.current.y = (self.current.y as isize + self.increment.x) as usize;
 
         Some(result)
     }
