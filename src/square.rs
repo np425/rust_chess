@@ -1,4 +1,6 @@
-use crate::board::{Board, Distance, Path};
+use std::fmt::{Debug, Formatter};
+
+use crate::board::{Board, Coord, Path};
 use crate::player::Player;
 use crate::position::Position;
 
@@ -12,7 +14,43 @@ pub enum Square {
     Empty,
 }
 
+impl Debug for Square {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.letter())
+    }
+}
+
 impl Square {
+    fn letter(&self) -> char {
+        match self {
+            Square::Knight(player) => match player {
+                Player::White => 'N',
+                _ => 'n'
+            },
+            Square::Bishop(player) => match player {
+                Player::White => 'B',
+                _ => 'b'
+            },
+            Square::Queen(player) => match player {
+                Player::White => 'Q',
+                _ => 'q'
+            },
+            Square::Rook(player) => match player {
+                Player::White => 'R',
+                _ => 'r'
+            },
+            Square::King(player) => match player {
+                Player::White => 'K',
+                _ => 'k'
+            },
+            Square::Pawn(player) => match player {
+                Player::White => 'P',
+                _ => 'p'
+            },
+            Square::Empty => '_'
+        }
+    }
+    
     fn is_path_clear(board: &Board, path: Path) -> bool {
         let d = path.distance();
 
@@ -23,15 +61,12 @@ impl Square {
             return true;
         }
 
-        let incr = Distance {
-            x: if d.x > 0 { 1 } else { -1 },
-            y: if d.y > 0 { 1 } else { -1 },
+        let increment = Coord {
+            x: d.x.signum(),
+            y: d.y.signum(),
         };
 
-        let mut iter = board.iter();
-        iter.current = path.from;
-        iter.increment = incr;
-
+        let iter = board.path_iter(path.from, increment);
         for (_, square) in iter.take_while(|(coord, _)| *coord != path.to) {
             if let Square::Empty = square {
                 return false;
@@ -53,98 +88,48 @@ impl Square {
         }
     }
 
-    // TODO: Simplify
     pub fn can_move(&self, pos: &Position, path: Path) -> bool {
-        if !Self::is_path_clear(pos.board(), path) {
-            return false;
-        }
-
-        let d = path.distance();
-
-        let player = self.player().unwrap();
-
-        let no_checks = pos.checks(player)
-            .map_or(false, |checks| checks.is_empty());
-
-        match self {
-            // TODO: defending with pieces
-            Square::Rook(_) => {
-                no_checks && d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0
-            }
-            Square::Bishop(_) => {
-                no_checks && d.x.abs() == d.y.abs() && d.x != 0
-            }
-            Square::Queen(_) => {
-                no_checks && (d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0) || (d.x.abs() == d.y.abs() && d.x != 0)
-            }
-            Square::Knight(_) => {
-                no_checks && d.x.abs() * d.y.abs() == 2
-            }
-            Square::King(_) => {
-                // TODO: implement checks, etc
-                d.x.abs() <= 1 && d.y.abs() <= 1 && !pos.is_coord_defended(path.to, player.enemy())
-            }
-            Square::Pawn(_) => {
-                let second_rank_y = match player {
-                    Player::White => 1,
-                    Player::Black => pos.board().ranks_len() - 2,
-                };
-
-                let dir = match player {
-                    Player::White => 1,
-                    Player::Black => -1,
-                };
-
-                d.y == dir || second_rank_y == path.from.y && d.y == 2 * dir
-            }
-            _ => false
-        }
+        self.defends(pos.board(), path)
     }
 
     pub fn can_attack(&self, pos: &Position, path: Path) -> bool {
-        if !Self::is_path_clear(pos.board(), path) {
+        self.defends(pos.board(), path)
+    }
+
+    pub fn defends(&self, board: &Board, path: Path) -> bool {
+        if !Self::is_path_clear(board, path) {
             return false;
         }
 
         let d = path.distance();
 
-        let player = self.player().unwrap();
-
-        let no_checks = pos.checks(player)
-            .map_or(false, |checks| checks.is_empty());
-
         match self {
             // TODO: defending with pieces
             Square::Rook(_) => {
-                no_checks && d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0
+                d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0
             }
             Square::Bishop(_) => {
-                no_checks && d.x.abs() == d.y.abs() && d.x != 0
+                d.x.abs() == d.y.abs() && d.x != 0
             }
             Square::Queen(_) => {
-                no_checks && (d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0) || (d.x.abs() == d.y.abs() && d.x != 0)
+                (d.x == 0 && d.y != 0 || d.x != 0 && d.y == 0) || (d.x.abs() == d.y.abs() && d.x != 0)
             }
             Square::Knight(_) => {
-                no_checks && d.x.abs() * d.y.abs() == 2
+                d.x.abs() * d.y.abs() == 2
             }
             Square::King(_) => {
-                // TODO: implement checks, etc
-                d.x.abs() <= 1 && d.y.abs() <= 1 && !pos.is_coord_defended(path.to, player.enemy())
+                d.x.abs() <= 1 && d.y.abs() <= 1
             }
             Square::Pawn(_) => {
-                let dir = match player {
-                    Player::White => 1,
-                    Player::Black => -1,
+                let dir = match self.player() {
+                    Some(Player::White) => 1,
+                    Some(Player::Black) => -1,
+                    _ => return false
                 };
 
                 d.y == dir && d.x == 1
-                // TODO: en passant
             }
             _ => false
         }
-    }
-    
-    pub fn defends(&self, board: &Board, path: Path) -> bool {
-        true
     }
 }

@@ -1,4 +1,4 @@
-use crate::board::{Board, Coord, Distance, Path};
+use crate::board::{Board, Coord, Path};
 use crate::player::Player;
 use crate::square::Square;
 
@@ -11,7 +11,7 @@ pub struct Position {
 }
 
 impl Position {
-    fn king_pos(&self, player: Player) -> Coord {
+    pub fn king_pos(&self, player: Player) -> Coord {
         match player {
             Player::White => self.king_pos[0],
             Player::Black => self.king_pos[1]
@@ -22,9 +22,6 @@ impl Position {
         (player == self.player).then_some(&self.checks)
     }
 
-    // TODO: Add constructors to path and coord
-    // TODO: Add from into for path and coord
-    // TODO: Simplify iterating over board (provide alternate methods)
     pub fn is_coord_defended(&self, target: Coord, by_player: Player) -> bool {
         self.board.iter()
             .any(|(coord, square)| {
@@ -36,9 +33,12 @@ impl Position {
     pub fn board(&self) -> &Board {
         &self.board
     }
+
+    pub fn make_move(&mut self) -> bool {
+        true
+    }
 }
 
-// TODO: Position Builder
 pub struct PositionBuilder {
     board: Board,
     player: Player,
@@ -52,7 +52,7 @@ impl PositionBuilder {
             board,
             player,
             king_pos: [vec![], vec![]],
-            checks: [vec![], vec![]]
+            checks: [vec![], vec![]],
         };
 
         builder.find_kings();
@@ -63,12 +63,12 @@ impl PositionBuilder {
 
     fn find_kings(&mut self) {
         self.board.iter()
-            .filter(|(coord, square)| matches!(square, Square::King(_)))
             .for_each(|(coord, square)| {
-                match square.player() {
-                    Some(Player::White) => self.king_pos[0].push(coord),
-                    Some(Player::Black) => self.king_pos[1].push(coord),
-                    _ => {}
+                let Square::King(player) = square else { return; };
+
+                match player {
+                    Player::White => self.king_pos[0].push(coord),
+                    Player::Black => self.king_pos[1].push(coord),
                 }
             });
     }
@@ -86,7 +86,6 @@ impl PositionBuilder {
                         _ => {}
                     }
                 }
-
             }
         }
     }
@@ -96,6 +95,20 @@ impl PositionBuilder {
     }
 
     pub fn try_build(self) -> Option<Position> {
-        todo!()
+        let [checkA, checkB] = self.checks;
+
+        let checks = match self.player {
+            Player::White => checkA,
+            Player::Black => checkB
+        };
+
+        let king_pos = [*self.king_pos[0].get(0)?, *self.king_pos[1].get(0)?];
+
+        Some(Position {
+            board: self.board,
+            king_pos,
+            checks,
+            player: self.player,
+        })
     }
 }
