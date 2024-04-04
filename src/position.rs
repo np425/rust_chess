@@ -1,23 +1,34 @@
-use crate::board::{Board, Coord, Piece, Player, Square};
+use crate::board::{Board, Color, Coord, Piece, Square};
 
-#[derive(Debug, Clone, Copy, Default)]
-pub enum CastlingSide {
-    #[default]
-    KingSide,
-    QueenSide,
+#[derive(Debug, Clone, Copy)]
+pub enum CastleSide {
+    King,
+    Queen,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
-pub struct CastleOptions {
-    pub king_side: bool,
-    pub queen_side: bool,
+pub struct CastleRights {
+    pub king: bool,
+    pub queen: bool,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
 pub struct Position {
     board: Board,
-    to_play: Player,
-    castle_opts: CastleOptions,
+    to_play: Color,
+    castle_rights: CastleRights,
+}
+
+pub enum MoveErr {
+    MoveToSameSquare,
+    InvalidCoord,
+    OriginSquareEmpty,
+    DoesNotOwnOriginPiece,
+    OwnsTargetPiece,
+    InvalidMoveShape,
+}
+
+pub enum CastleErr {
+    LackingPerms,
 }
 
 // TODO: Next turn
@@ -26,39 +37,46 @@ impl Position {
         &self.board
     }
 
-    pub fn to_play(&self) -> Player {
+    pub fn to_play(&self) -> Color {
         self.to_play
     }
 
-    pub fn castle_options(&self) -> CastleOptions {
-        self.castle_opts
+    pub fn castle_rights(&self) -> CastleRights {
+        self.castle_rights
     }
 
-    pub fn can_move_piece(&self, origin: Coord, target: Coord) -> Option<()> {
-        let origin_square = self.board.get(origin)?;
-        let target_square = self.board.get(target)?;
+    pub fn can_move_piece(
+        &self,
+        origin_coord: Coord,
+        target_coord: Coord,
+    ) -> Result<(Square, Square), MoveErr> {
+        use MoveErr::*;
 
-        // Target square cannot be origin square
-        if target_square == origin_square {
-            return None;
+        // Origin coord cannot be target coord
+        let origin_square = self.board.square(origin_coord).ok_or(InvalidCoord)?;
+        let target_square = self.board.square(target_coord).ok_or(InvalidCoord)?;
+
+        // Target coordinate cannot be origin coordinate
+        if origin_coord != target_coord {
+            return Err(MoveToSameSquare);
         }
 
         // Origin square must be non empty
-        let (origin_piece, origin_player) = origin_square?;
+        let (origin_piece, origin_player) = origin_square.piece().ok_or(OriginSquareEmpty)?;
 
         // Origin piece has to be owned by player
         if origin_player != self.to_play {
-            return None;
+            return Err(DoesNotOwnOriginPiece);
         }
 
-        // Target square has to be empty or belong to enemy
-        if matches!(target_square, Some((_, target_player)) if target_player != origin_player) {
-            return None;
+        // Target square cannot belong to player
+        if target_square.player() == Some(self.to_play) {
+            return Err(OwnsTargetPiece);
         }
 
         let (dy, dx) = (
-            (target.0 - origin.0) as isize,
-            (target.1 - target.1) as isize,
+            (target_coord.file() - origin_coord.file()) as i8,
+            (target_coord.rank() - origin_coord.rank()) as i8,
         );
 
         // TODO: Empty path, checks, en passant
@@ -70,106 +88,157 @@ impl Position {
             Piece::Bishop => dx.abs() == dy.abs(),
             Piece::Pawn => {
                 let direction = match origin_player {
-                    Player::White => 1,
-                    Player::Black => -1,
+                    Color::White => 1,
+                    Color::Black => -1,
                 };
 
                 match target_square {
                     // Attack
-                    Some(_) => dy == direction && dx.abs() == 1,
+                    Square::Piece(..) => dy == direction && dx.abs() == 1,
 
                     // Move normally
-                    None => dy == direction && dx == 0,
+                    Square::Empty => dy == direction && dx == 0,
                 }
             }
         };
 
         if !can_move {
-            return None;
+            return Err(InvalidMoveShape);
         }
 
-        return Some(());
+        Ok((origin_square, target_square))
     }
 
-    pub fn can_castle(&self, side: CastlingSide) -> bool {
+    pub fn can_castle(&self, side: CastleSide) -> Result<(), CastleErr> {
+        use CastleErr::*;
+
         let perm = match side {
-            CastlingSide::QueenSide => self.castle_opts.queen_side,
-            CastlingSide::KingSide => self.castle_opts.king_side,
+            CastleSide::Queen => self.castle_rights.queen,
+            CastleSide::King => self.castle_rights.king,
         };
 
         if !perm {
-            return false;
+            return Err(LackingPerms);
         }
 
         // TODO: Checks, empty path
-        return true;
+        Ok(())
     }
 
-    pub fn try_move_piece(&mut self, origin: Coord, target: Coord) -> Option<(Square, Square)> {
-        self.can_move_piece(origin, target)?;
+    pub fn try_move_piece(
+        &mut self,
+        origin_coord: Coord,
+        target_coord: Coord,
+    ) -> Result<(Square, Square), MoveErr> {
+        self.can_move_piece(origin_coord, target_coord)?;
 
-        let origin_square = self.board[origin];
-        let target_square = self.board[target];
-
-        // Move piece
-        self.board[target] = self.board[origin];
-        self.board[origin] = None;
+        let (origin_square, target_square) = self.board.move_unchecked(origin_coord, target_coord);
 
         let first_row_y = match self.to_play {
-            Player::White => 0,
-            Player::Black => 7,
+            Color::White => 0,
+            Color::Black => 7,
         };
 
         // Update castling permissions
-        match origin_square {
-            Some((Piece::Rook, _)) if origin == (first_row_y, 0) => {
-                self.castle_opts.king_side = false
+        match origin_square.piece_kind().unwrap() {
+            Piece::Rook if origin_coord == Coord::make(first_row_y, 0) => {
+                self.castle_rights.king = false
             }
-            Some((Piece::Rook, _)) if origin == (first_row_y, 7) => {
-                self.castle_opts.queen_side = false
+            Piece::Rook if origin_coord == Coord::make(first_row_y, 7) => {
+                self.castle_rights.king = false
             }
-            Some((Piece::King, _)) => {
-                self.castle_opts.king_side = false;
-                self.castle_opts.queen_side = false;
+            Piece::King => {
+                self.castle_rights.king = false;
+                self.castle_rights.queen = false;
             }
             _ => {}
-        };
-
-        Some((origin_square, target_square))
-    }
-
-    pub fn try_castle(&mut self, side: CastlingSide) -> bool {
-        if !self.can_castle(side) {
-            return false;
         }
 
+        Ok((origin_square, target_square))
+    }
+
+    pub fn try_castle(&mut self, side: CastleSide) -> Result<(), CastleErr> {
+        self.can_castle(side)?;
+
         let first_row_y = match self.to_play {
-            Player::White => 0,
-            Player::Black => 7,
+            Color::White => 0,
+            Color::Black => 7,
         };
 
-        let (rook_x, direction): (usize, isize) = match side {
-            CastlingSide::KingSide => (0, -1),
-            CastlingSide::QueenSide => (7, 1),
+        let (rook_x, direction) = match side {
+            CastleSide::King => (0, -1),
+            CastleSide::Queen => (7, 1),
         };
 
         let king_x = 4;
 
-        let king_square = self.board[(first_row_y, king_x)];
-        let rook_square = self.board[(first_row_y, rook_x)];
+        self.board.move_unchecked(
+            Coord::make(first_row_y, king_x),
+            Coord::make(first_row_y, king_x.wrapping_add_signed(direction * 2)),
+        );
 
-        // Remove pieces from old squares
-        self.board[(first_row_y, king_x)] = None;
-        self.board[(first_row_y, rook_x)] = None;
+        self.board.move_unchecked(
+            Coord::make(first_row_y, rook_x),
+            Coord::make(first_row_y, king_x.wrapping_add_signed(direction)),
+        );
 
-        // Place pieces to new squares
-        self.board[(first_row_y, (king_x + direction * 2)] = king_square;
-        self.board[(first_row_y, (king_x + direction)] = rook_square;
+        Ok(())
     }
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+pub enum InvalidPosition {
+    InvalidAmountOfKings,
+}
+
+#[derive(Debug, Clone)]
 pub struct PositionBuilder {
-    pub board: Board,
-    pub to_play: Player,
+    board: Board,
+    to_play: Color,
+}
+
+impl Default for PositionBuilder {
+    fn default() -> Self {
+        Self {
+            to_play: Color::White,
+            board: Board::default(),
+        }
+    }
+}
+
+impl PositionBuilder {
+    fn validate_kings(&self) -> Result<(), InvalidPosition> {
+        use InvalidPosition::*;
+
+        let iter = self.board.iter();
+
+        let mut kings = (0, 0);
+
+        iter.filter_map(|(square, _)| square.piece())
+            .filter_map(|(piece, color)| (piece == Piece::King).then_some(color))
+            .for_each(|color| {
+                match color {
+                    Color::White => kings.0 += 1,
+                    Color::Black => kings.1 += 1,
+                };
+            });
+
+        if kings.0 * kings.1 != 1 {
+            return Err(InvalidAmountOfKings);
+        }
+
+        Ok(())
+    }
+
+    pub fn try_build(self) -> Result<Position, InvalidPosition> {
+        self.validate_kings()?;
+
+        Err(InvalidPosition::InvalidAmountOfKings)
+    }
+}
+
+impl TryInto<Position> for PositionBuilder {
+    type Error = InvalidPosition;
+    fn try_into(self) -> Result<Position, InvalidPosition> {
+        self.try_build()
+    }
 }
