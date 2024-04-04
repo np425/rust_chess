@@ -214,7 +214,8 @@ impl PositionBuilder {
         let mut kings = (0, 0);
 
         iter.filter_map(|(square, _)| square.piece())
-            .filter_map(|(piece, color)| (piece == Piece::King).then_some(color))
+            .filter(|(piece, _)| *piece == Piece::King)
+            .map(|(_, color)| color)
             .for_each(|color| {
                 match color {
                     Color::White => kings.0 += 1,
@@ -222,7 +223,7 @@ impl PositionBuilder {
                 };
             });
 
-        if kings.0 * kings.1 != 1 {
+        if kings != (1, 1) {
             return Err(InvalidAmountOfKings);
         }
 
