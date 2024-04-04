@@ -215,8 +215,7 @@ impl PositionBuilder {
 
         iter.filter_map(|(square, _)| square.piece())
             .filter(|(piece, _)| *piece == Piece::King)
-            .map(|(_, color)| color)
-            .for_each(|color| {
+            .for_each(|(_, color)| {
                 match color {
                     Color::White => kings.0 += 1,
                     Color::Black => kings.1 += 1,
