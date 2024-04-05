@@ -74,36 +74,12 @@ impl Position {
             return Err(OwnsTargetPiece);
         }
 
-        let (dy, dx) = (
-            (target_coord.file() - origin_coord.file()) as i8,
-            (target_coord.rank() - origin_coord.rank()) as i8,
-        );
+        let move_shape = move_shape((origin_piece, origin_player), origin_coord, target_coord);
 
-        // TODO: Empty path, checks, en passant
-        let can_move = match origin_piece {
-            Piece::Rook => dx * dy == 0,
-            Piece::King => dx.abs() <= 1 && dy.abs() <= 1,
-            Piece::Queen => dx * dy == 0 || dx.abs() == dy.abs(),
-            Piece::Knight => dx.abs() * dy.abs() == 2,
-            Piece::Bishop => dx.abs() == dy.abs(),
-            Piece::Pawn => {
-                let direction = match origin_player {
-                    Color::White => 1,
-                    Color::Black => -1,
-                };
-
-                match target_square {
-                    // Attack
-                    Square::Piece(..) => dy == direction && dx.abs() == 1,
-
-                    // Move normally
-                    Square::Empty => dy == direction && dx == 0,
-                }
-            }
-        };
-
-        if !can_move {
-            return Err(InvalidMoveShape);
+        match move_shape {
+            MoveShape::NoMove => return Err(InvalidMoveShape),
+            MoveShape::JustMove if target_square != Square::Empty => return Err(InvalidMoveShape),
+            _ => {}
         }
 
         Ok((origin_square, target_square))
@@ -186,8 +162,10 @@ impl Position {
     }
 }
 
-pub enum InvalidPosition {
+pub enum PositionErr {
     InvalidAmountOfKings,
+    PawnsOnFirstRank,
+    KingsTooClose,
 }
 
 #[derive(Debug, Clone)]
@@ -196,6 +174,7 @@ pub struct PositionBuilder {
     to_play: Color,
 }
 
+// TODO: Default board setup
 impl Default for PositionBuilder {
     fn default() -> Self {
         Self {
@@ -206,39 +185,108 @@ impl Default for PositionBuilder {
 }
 
 impl PositionBuilder {
-    fn validate_kings(&self) -> Result<(), InvalidPosition> {
-        use InvalidPosition::*;
+    pub fn is_valid(&self) -> Result<(Coord, Coord), PositionErr> {
+        // Validate kings
+        let iter = self
+            .board
+            .iter()
+            .filter_map(|(square, coord)| {
+                square.piece().map(|(piece, color)| (piece, color, coord))
+            })
+            .filter_map(|(piece, color, coord)| (piece == Piece::King).then_some((color, coord)));
 
-        let iter = self.board.iter();
+        let mut kings = (None, None);
 
-        let mut kings = (0, 0);
+        for (color, coord) in iter {
+            let king = match color {
+                Color::White => &mut kings.0,
+                Color::Black => &mut kings.1,
+            };
 
-        iter.filter_map(|(square, _)| square.piece())
-            .filter(|(piece, _)| *piece == Piece::King)
-            .for_each(|(_, color)| {
-                match color {
-                    Color::White => kings.0 += 1,
-                    Color::Black => kings.1 += 1,
-                };
-            });
-
-        if kings != (1, 1) {
-            return Err(InvalidAmountOfKings);
+            if king.replace(coord).is_some() {
+                return Err(PositionErr::InvalidAmountOfKings);
+            }
         }
 
-        Ok(())
+        let kings = (
+            kings.0.ok_or(PositionErr::InvalidAmountOfKings)?,
+            kings.1.ok_or(PositionErr::InvalidAmountOfKings)?,
+        );
+
+        // Pawns on first rank
+        let pawns_exist = self
+            .board
+            .iter()
+            .filter(|(_, coord)| matches!(coord.rank(), 0 | 7))
+            .filter_map(|(square, _)| square.piece())
+            .any(|(piece, _)| piece == Piece::Pawn);
+
+        if pawns_exist {
+            return Err(PositionErr::PawnsOnFirstRank);
+        }
+
+        // Kings too close
+        let (dx, dy) = (
+            kings.1.file().abs_diff(kings.0.file()),
+            kings.1.rank().abs_diff(kings.1.file()),
+        );
+
+        if dx <= 1 || dy <= 1 {
+            return Err(PositionErr::KingsTooClose);
+        }
+
+        // TODO: Passant
+        // TODO: Checks
+        Ok(kings)
     }
 
-    pub fn try_build(self) -> Result<Position, InvalidPosition> {
-        self.validate_kings()?;
+    pub fn try_build(self) -> Result<Position, PositionErr> {
+        self.is_valid()?;
 
-        Err(InvalidPosition::InvalidAmountOfKings)
+        Err(PositionErr::InvalidAmountOfKings)
     }
 }
 
 impl TryInto<Position> for PositionBuilder {
-    type Error = InvalidPosition;
-    fn try_into(self) -> Result<Position, InvalidPosition> {
+    type Error = PositionErr;
+    fn try_into(self) -> Result<Position, PositionErr> {
         self.try_build()
+    }
+}
+
+enum MoveShape {
+    JustMove,
+    MoveAttack,
+    NoMove,
+}
+
+fn move_shape(piece: (Piece, Color), origin_coord: Coord, target_coord: Coord) -> MoveShape {
+    use {MoveShape::*, Piece::*};
+
+    let (dy, dx) = (
+        (target_coord.file() - origin_coord.file()) as i8,
+        (target_coord.rank() - origin_coord.rank()) as i8,
+    );
+
+    let direction = match piece.1 {
+        Color::White => 1,
+        Color::Black => -1,
+    };
+
+    let rank_2nd = match piece.1 {
+        Color::White => 1,
+        Color::Black => 6,
+    };
+
+    match piece.0 {
+        Pawn if dy == direction && dx == 0 => JustMove,
+        Pawn if origin_coord.rank() == rank_2nd && dy == direction * 2 && dx == 0 => JustMove,
+        Pawn if dy == direction && dx.abs() == 1 => MoveAttack,
+        Rook if dx * dy == 0 => MoveAttack,
+        King if dx.abs() <= 1 && dy.abs() <= 1 => MoveAttack,
+        Queen if dx * dy == 0 || dx.abs() == dy.abs() => MoveAttack,
+        Knight if dx.abs() * dy.abs() == 2 => MoveAttack,
+        Bishop if dx.abs() == dy.abs() => MoveAttack,
+        _ => NoMove,
     }
 }
