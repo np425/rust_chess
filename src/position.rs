@@ -12,12 +12,6 @@ pub struct CastleRights {
     pub queen: bool,
 }
 
-pub struct Position {
-    board: Board,
-    to_play: Color,
-    castle_rights: CastleRights,
-}
-
 pub enum MoveErr {
     MoveToSameSquare,
     InvalidCoord,
@@ -31,6 +25,20 @@ pub enum CastleErr {
     LackingPerms,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum State {
+    Playing,
+    Checkmate(Color),
+    Stalemate(Color),
+}
+
+pub struct Position {
+    board: Board,
+    to_play: Color,
+    castle_rights: (CastleRights, CastleRights),
+    state: State,
+}
+
 // TODO: Next turn
 impl Position {
     pub fn board(&self) -> &Board {
@@ -42,7 +50,7 @@ impl Position {
     }
 
     pub fn castle_rights(&self) -> CastleRights {
-        self.castle_rights
+        self.castle_rights.0
     }
 
     pub fn can_move_piece(
@@ -78,7 +86,7 @@ impl Position {
 
         match move_shape {
             MoveShape::NoMove => return Err(InvalidMoveShape),
-            MoveShape::JustMove if target_square != Square::Empty => return Err(InvalidMoveShape),
+            MoveShape::OnlyMove if target_square != Square::Empty => return Err(InvalidMoveShape),
             _ => {}
         }
 
@@ -89,8 +97,8 @@ impl Position {
         use CastleErr::*;
 
         let perm = match side {
-            CastleSide::Queen => self.castle_rights.queen,
-            CastleSide::King => self.castle_rights.king,
+            CastleSide::Queen => self.castle_rights.0.queen,
+            CastleSide::King => self.castle_rights.0.king,
         };
 
         if !perm {
@@ -105,7 +113,7 @@ impl Position {
         &mut self,
         origin_coord: Coord,
         target_coord: Coord,
-    ) -> Result<(Square, Square), MoveErr> {
+    ) -> Result<(State, Square, Square), MoveErr> {
         self.can_move_piece(origin_coord, target_coord)?;
 
         let (origin_square, target_square) = self.board.move_unchecked(origin_coord, target_coord);
@@ -118,22 +126,22 @@ impl Position {
         // Update castling permissions
         match origin_square.piece_kind().unwrap() {
             Piece::Rook if origin_coord == Coord::make(first_row_y, 0) => {
-                self.castle_rights.king = false
+                self.castle_rights.0.king = false
             }
             Piece::Rook if origin_coord == Coord::make(first_row_y, 7) => {
-                self.castle_rights.king = false
+                self.castle_rights.0.king = false
             }
             Piece::King => {
-                self.castle_rights.king = false;
-                self.castle_rights.queen = false;
+                self.castle_rights.0.king = false;
+                self.castle_rights.0.queen = false;
             }
             _ => {}
         }
 
-        Ok((origin_square, target_square))
+        Ok((self.next_turn(), origin_square, target_square))
     }
 
-    pub fn try_castle(&mut self, side: CastleSide) -> Result<(), CastleErr> {
+    pub fn try_castle(&mut self, side: CastleSide) -> Result<State, CastleErr> {
         self.can_castle(side)?;
 
         let first_row_y = match self.to_play {
@@ -158,7 +166,21 @@ impl Position {
             Coord::make(first_row_y, king_x.wrapping_add_signed(direction)),
         );
 
-        Ok(())
+        Ok(self.next_turn())
+    }
+
+    fn next_turn(&mut self) -> State {
+        self.to_play = match self.to_play {
+            Color::White => Color::Black,
+            Color::Black => Color::White,
+        };
+
+        self.castle_rights = (self.castle_rights.1, self.castle_rights.0);
+        self.state = State::Playing;
+
+        self.state
+
+        // TODO: New state
     }
 }
 
@@ -255,8 +277,8 @@ impl TryInto<Position> for PositionBuilder {
 }
 
 enum MoveShape {
-    JustMove,
-    MoveAttack,
+    OnlyMove,
+    MoveAndAttack,
     NoMove,
 }
 
@@ -279,14 +301,14 @@ fn move_shape(piece: (Piece, Color), origin_coord: Coord, target_coord: Coord) -
     };
 
     match piece.0 {
-        Pawn if dy == direction && dx == 0 => JustMove,
-        Pawn if origin_coord.rank() == rank_2nd && dy == direction * 2 && dx == 0 => JustMove,
-        Pawn if dy == direction && dx.abs() == 1 => MoveAttack,
-        Rook if dx * dy == 0 => MoveAttack,
-        King if dx.abs() <= 1 && dy.abs() <= 1 => MoveAttack,
-        Queen if dx * dy == 0 || dx.abs() == dy.abs() => MoveAttack,
-        Knight if dx.abs() * dy.abs() == 2 => MoveAttack,
-        Bishop if dx.abs() == dy.abs() => MoveAttack,
+        Pawn if dy == direction && dx == 0 => OnlyMove,
+        Pawn if origin_coord.rank() == rank_2nd && dy == direction * 2 && dx == 0 => OnlyMove,
+        Pawn if dy == direction && dx.abs() == 1 => MoveAndAttack,
+        Rook if dx * dy == 0 => MoveAndAttack,
+        King if dx.abs() <= 1 && dy.abs() <= 1 => MoveAndAttack,
+        Queen if dx * dy == 0 || dx.abs() == dy.abs() => MoveAndAttack,
+        Knight if dx.abs() * dy.abs() == 2 => MoveAndAttack,
+        Bishop if dx.abs() == dy.abs() => MoveAndAttack,
         _ => NoMove,
     }
 }
