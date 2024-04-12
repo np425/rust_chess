@@ -1,10 +1,10 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Color {
     White,
     Black,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Piece {
     Pawn,
     Knight,
@@ -14,7 +14,7 @@ pub enum Piece {
     King,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Square {
     #[default]
     Empty,
@@ -46,26 +46,17 @@ impl Square {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Coord {
-    coord: u8,
+    pub file: u8,
+    pub rank: u8,
 }
 
 impl Coord {
-    pub fn make(rank: u8, file: u8) -> Self {
-        Self {
-            coord: file * 8 + rank,
-        }
-    }
-
-    pub fn file(&self) -> u8 {
-        self.coord / 8
-    }
-
-    pub fn rank(&self) -> u8 {
-        self.coord % 8
+    pub fn make(file: u8, rank: u8) -> Self {
+        Self { file, rank }
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Board {
     pieces: [Square; 64],
 }
@@ -80,11 +71,11 @@ impl Default for Board {
 
 impl Board {
     pub fn square(&self, coord: Coord) -> Option<Square> {
-        self.pieces.get(coord.coord as usize).copied()
+        self.pieces.get(resolve_coord(coord)).copied()
     }
 
     pub fn square_unchecked_mut(&mut self, coord: Coord) -> &mut Square {
-        &mut self.pieces[coord.coord as usize]
+        &mut self.pieces[resolve_coord(coord)]
     }
 
     pub fn move_unchecked(&mut self, origin_coord: Coord, target_coord: Coord) -> (Square, Square) {
@@ -105,6 +96,25 @@ impl Board {
             coord: Coord::default(),
         }
     }
+
+    pub fn path_iter(&self, coord: Coord, increment: (i8, i8)) -> BoardPathIter {
+        BoardPathIter {
+            board: self,
+            coord,
+            increment,
+        }
+    }
+}
+
+fn resolve_coord(coord: Coord) -> usize {
+    (coord.file * 8 + coord.rank) as usize
+}
+
+fn next_coord(coord: Coord) -> Coord {
+    Coord {
+        file: coord.file + (coord.rank / 8),
+        rank: (coord.rank + 1) % 8,
+    }
 }
 
 pub struct BoardIter<'a> {
@@ -118,7 +128,29 @@ impl Iterator for BoardIter<'_> {
         let current = self.coord;
         let square = self.board.square(current)?;
 
-        self.coord.coord += 1;
+        self.coord = next_coord(current);
+
+        Some((square, current))
+    }
+}
+
+pub struct BoardPathIter<'a> {
+    board: &'a Board,
+    coord: Coord,
+    increment: (i8, i8),
+}
+
+impl Iterator for BoardPathIter<'_> {
+    type Item = (Square, Coord);
+    fn next(&mut self) -> Option<Self::Item> {
+        let current = self.coord;
+        let square = self.board.square(current)?;
+
+        self.coord = Coord {
+            file: self.coord.file.wrapping_add_signed(self.increment.0),
+            rank: self.coord.rank.wrapping_add_signed(self.increment.1),
+        };
+
         Some((square, current))
     }
 }

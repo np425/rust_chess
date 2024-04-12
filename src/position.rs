@@ -1,17 +1,18 @@
 use crate::board::{Board, Color, Coord, Piece, Square};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CastleSide {
     King,
     Queen,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CastleRights {
     pub king: bool,
     pub queen: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MoveErr {
     MoveToSameSquare,
     InvalidCoord,
@@ -19,19 +20,22 @@ pub enum MoveErr {
     DoesNotOwnOriginPiece,
     OwnsTargetPiece,
     InvalidMoveShape,
+    PathNotEmpty,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CastleErr {
     LackingPerms,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum State {
     Playing,
     Checkmate(Color),
     Stalemate(Color),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Position {
     board: Board,
     to_play: Color,
@@ -57,40 +61,8 @@ impl Position {
         &self,
         origin_coord: Coord,
         target_coord: Coord,
-    ) -> Result<(Square, Square), MoveErr> {
-        use MoveErr::*;
-
-        // Origin coord cannot be target coord
-        let origin_square = self.board.square(origin_coord).ok_or(InvalidCoord)?;
-        let target_square = self.board.square(target_coord).ok_or(InvalidCoord)?;
-
-        // Target coordinate cannot be origin coordinate
-        if origin_coord != target_coord {
-            return Err(MoveToSameSquare);
-        }
-
-        // Origin square must be non empty
-        let (origin_piece, origin_player) = origin_square.piece().ok_or(OriginSquareEmpty)?;
-
-        // Origin piece has to be owned by player
-        if origin_player != self.to_play {
-            return Err(DoesNotOwnOriginPiece);
-        }
-
-        // Target square cannot belong to player
-        if target_square.player() == Some(self.to_play) {
-            return Err(OwnsTargetPiece);
-        }
-
-        let move_shape = move_shape((origin_piece, origin_player), origin_coord, target_coord);
-
-        match move_shape {
-            MoveShape::NoMove => return Err(InvalidMoveShape),
-            MoveShape::OnlyMove if target_square != Square::Empty => return Err(InvalidMoveShape),
-            _ => {}
-        }
-
-        Ok((origin_square, target_square))
+    ) -> Result<(Square, Square, MoveShape), MoveErr> {
+        can_move(&self.board, self.to_play, origin_coord, target_coord)
     }
 
     pub fn can_castle(&self, side: CastleSide) -> Result<(), CastleErr> {
@@ -184,6 +156,7 @@ impl Position {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PositionErr {
     InvalidAmountOfKings,
     PawnsOnFirstRank,
@@ -239,7 +212,7 @@ impl PositionBuilder {
         let pawns_exist = self
             .board
             .iter()
-            .filter(|(_, coord)| matches!(coord.rank(), 0 | 7))
+            .filter(|(_, coord)| matches!(coord.rank, 0 | 7))
             .filter_map(|(square, _)| square.piece())
             .any(|(piece, _)| piece == Piece::Pawn);
 
@@ -249,8 +222,8 @@ impl PositionBuilder {
 
         // Kings too close
         let (dx, dy) = (
-            kings.1.file().abs_diff(kings.0.file()),
-            kings.1.rank().abs_diff(kings.1.file()),
+            kings.1.file.abs_diff(kings.0.file),
+            kings.1.rank.abs_diff(kings.1.file),
         );
 
         if dx <= 1 || dy <= 1 {
@@ -276,7 +249,7 @@ impl TryInto<Position> for PositionBuilder {
     }
 }
 
-enum MoveShape {
+pub enum MoveShape {
     OnlyMove,
     MoveAndAttack,
     NoMove,
@@ -286,8 +259,8 @@ fn move_shape(piece: (Piece, Color), origin_coord: Coord, target_coord: Coord) -
     use {MoveShape::*, Piece::*};
 
     let (dy, dx) = (
-        (target_coord.file() - origin_coord.file()) as i8,
-        (target_coord.rank() - origin_coord.rank()) as i8,
+        (target_coord.file - origin_coord.file) as i8,
+        (target_coord.rank - origin_coord.rank) as i8,
     );
 
     let direction = match piece.1 {
@@ -302,7 +275,7 @@ fn move_shape(piece: (Piece, Color), origin_coord: Coord, target_coord: Coord) -
 
     match piece.0 {
         Pawn if dy == direction && dx == 0 => OnlyMove,
-        Pawn if origin_coord.rank() == rank_2nd && dy == direction * 2 && dx == 0 => OnlyMove,
+        Pawn if origin_coord.rank == rank_2nd && dy == direction * 2 && dx == 0 => OnlyMove,
         Pawn if dy == direction && dx.abs() == 1 => MoveAndAttack,
         Rook if dx * dy == 0 => MoveAndAttack,
         King if dx.abs() <= 1 && dy.abs() <= 1 => MoveAndAttack,
@@ -311,4 +284,70 @@ fn move_shape(piece: (Piece, Color), origin_coord: Coord, target_coord: Coord) -
         Bishop if dx.abs() == dy.abs() => MoveAndAttack,
         _ => NoMove,
     }
+}
+
+fn can_move(
+    board: &Board,
+    player: Color,
+    origin_coord: Coord,
+    target_coord: Coord,
+) -> Result<(Square, Square, MoveShape), MoveErr> {
+    use MoveErr::*;
+
+    // Origin coord cannot be target coord
+    let origin_square = board.square(origin_coord).ok_or(InvalidCoord)?;
+    let target_square = board.square(target_coord).ok_or(InvalidCoord)?;
+
+    // Target coordinate cannot be origin coordinate
+    if origin_coord != target_coord {
+        return Err(MoveToSameSquare);
+    }
+
+    // Origin square must be non empty
+    let (origin_piece, origin_player) = origin_square.piece().ok_or(OriginSquareEmpty)?;
+
+    // Origin piece has to be owned by player
+    if origin_player != player {
+        return Err(DoesNotOwnOriginPiece);
+    }
+
+    // Target square cannot belong to player
+    if target_square.player() == Some(player) {
+        return Err(OwnsTargetPiece);
+    }
+
+    let move_shape = move_shape((origin_piece, origin_player), origin_coord, target_coord);
+
+    match move_shape {
+        MoveShape::NoMove => return Err(InvalidMoveShape),
+        MoveShape::OnlyMove if target_square != Square::Empty => return Err(InvalidMoveShape),
+        _ => {}
+    }
+
+    // Path must be empty
+    if !is_path_clear(board, origin_coord, target_coord) {
+        return Err(PathNotEmpty);
+    }
+
+    // TODO: Checks
+
+    // TODO: En passant
+
+    Ok((origin_square, target_square, move_shape))
+}
+
+fn is_path_clear(board: &Board, origin_coord: Coord, target_coord: Coord) -> bool {
+    let increment = (
+        (target_coord.file as i8 - origin_coord.file as i8).signum(),
+        (target_coord.rank as i8 - origin_coord.rank as i8).signum(),
+    );
+
+    let mut iter = board.path_iter(origin_coord, increment);
+
+    // Skip first coordinate
+    iter.next();
+
+    // Ensure all squares are empty
+    iter.take_while(|(_, coord)| coord.file != target_coord.file && coord.rank != target_coord.rank)
+        .all(|(square, _)| square == Square::Empty)
 }
