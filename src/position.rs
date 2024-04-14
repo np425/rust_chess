@@ -227,6 +227,7 @@ impl Default for PositionBuilder {
 }
 
 impl PositionBuilder {
+    /// TODO: Refactor
     pub fn is_valid(&self) -> Result<(Coord, Coord), PositionErr> {
         // Kings
         let mut white_king = None;
@@ -273,8 +274,8 @@ impl PositionBuilder {
         }
 
         // Checks
-        let checks_white: Vec<_> = iter_defenders(&self.board, white_king).collect();
-        let checks_black: Vec<_> = iter_defenders(&self.board, black_king).collect();
+        let checks_white: Vec<_> = iter_defenders(&self.board, white_king.1).collect();
+        let checks_black: Vec<_> = iter_defenders(&self.board, black_king.1).collect();
 
         // TODO: Do something with checks
         if !checks_white.is_empty() && !checks_black.is_empty() {}
@@ -373,18 +374,46 @@ fn can_move(
 // -------------
 
 // TODO: Optimise
-fn iter_defenders(board: &Board, origin: (Square, Coord)) -> impl Iterator<Item = Move> + '_ {
-    pawn_moves(board, origin)
-        .into_iter()
-        .flatten()
-        .chain(king_moves(board, origin).into_iter().flatten())
-        .chain(rook_moves(board, origin).into_iter().flatten())
-        .chain(queen_moves(board, origin).into_iter().flatten())
-        .chain(bishop_moves(board, origin).into_iter().flatten())
-        .chain(knight_moves(board, origin).into_iter().flatten())
-        .filter(|mov| mov.shape == MoveShape::MoveAndAttack)
-        .filter(move |mov| mov.target.1 == origin.1)
+fn iter_defenders(
+    board: &Board,
+    origin_coord: Coord,
+) -> impl Iterator<Item = (Square, Coord)> + '_ {
+    board
+        .iter(Coord::default())
+        .filter(move |(square, coord)| match *square {
+            Square::Empty => false,
+            Square::Piece(Piece::King, _) => {
+                defends(origin_coord, king_moves(board, (*square, *coord)))
+            }
+            Square::Piece(Piece::Pawn, _) => {
+                defends(origin_coord, pawn_moves(board, (*square, *coord)))
+            }
+            Square::Piece(Piece::Rook, _) => {
+                defends(origin_coord, rook_moves(board, (*square, *coord)))
+            }
+            Square::Piece(Piece::Queen, _) => {
+                defends(origin_coord, queen_moves(board, (*square, *coord)))
+            }
+            Square::Piece(Piece::Bishop, _) => {
+                defends(origin_coord, bishop_moves(board, (*square, *coord)))
+            }
+            Square::Piece(Piece::Knight, _) => {
+                defends(origin_coord, knight_moves(board, (*square, *coord)))
+            }
+        })
 }
+
+// TODO: Ugly
+fn defends<'a>(target_coord: Coord, iter: Option<impl Iterator<Item = Move> + 'a>) -> bool {
+    if let Some(iter) = iter {
+        iter.filter(|mov| mov.shape == MoveShape::MoveAndAttack)
+            .any(move |mov| mov.target.1 == target_coord)
+    } else {
+        false
+    }
+}
+
+// -------------
 
 fn pawn_moves(board: &Board, origin: (Square, Coord)) -> Option<impl Iterator<Item = Move> + '_> {
     let (square, coord) = origin;
