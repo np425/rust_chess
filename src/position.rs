@@ -1,5 +1,4 @@
 use crate::board::{Board, Color, Coord, Piece, Square};
-use std::iter;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum CastleSide {
@@ -7,11 +6,24 @@ pub enum CastleSide {
     Queen,
 }
 
+// -------------
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct CastleRights {
     pub king: bool,
     pub queen: bool,
 }
+
+// -------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum State {
+    Playing,
+    Checkmate(Color),
+    Stalemate(Color),
+}
+
+// -------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum MoveErr {
@@ -29,22 +41,33 @@ pub enum CastleErr {
     LackingPerms,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum State {
-    Playing,
-    Checkmate(Color),
-    Stalemate(Color),
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub enum MoveShape {
+    OnlyMove,
+    MoveAndAttack,
 }
+
+// -------------
+
+#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
+pub struct Move {
+    pub origin: (Square, Coord),
+    pub target: (Square, Coord),
+    pub shape: MoveShape,
+}
+
+// -------------
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Position {
     board: Board,
     to_play: Color,
     castle_rights: (CastleRights, CastleRights),
+    king_coord: (Coord, Coord),
+    checks: Vec<(Square, Coord)>,
     state: State,
 }
 
-// TODO: Next turn
 impl Position {
     pub fn board(&self) -> &Board {
         &self.board
@@ -58,12 +81,24 @@ impl Position {
         self.castle_rights.0
     }
 
+    pub fn state(&self) -> State {
+        self.state
+    }
+
+    pub fn king_coord(&self) -> Coord {
+        self.king_coord.0
+    }
+
+    pub fn checks(&self) -> &[(Square, Coord)] {
+        self.checks.as_slice()
+    }
+
     pub fn can_move_piece(
         &self,
         origin_coord: Coord,
         target_coord: Coord,
     ) -> Result<(Square, Square, MoveShape), MoveErr> {
-        can_move(&self.board, self.to_play, origin_coord, target_coord)
+        unimplemented!()
     }
 
     pub fn can_castle(&self, side: CastleSide) -> Result<(), CastleErr> {
@@ -78,8 +113,7 @@ impl Position {
             return Err(LackingPerms);
         }
 
-        // TODO: Checks, empty path
-        Ok(())
+        todo!("checks, empty path")
     }
 
     pub fn try_move_piece(
@@ -111,6 +145,8 @@ impl Position {
             _ => {}
         }
 
+        // TODO: Update king pos if king moved
+
         Ok((self.next_turn(), origin_square, target_square))
     }
 
@@ -139,6 +175,12 @@ impl Position {
             Coord::make(first_row_y, king_x.wrapping_add_signed(direction)),
         );
 
+        // Update castling permissions
+        self.castle_rights.0 = CastleRights {
+            king: false,
+            queen: false,
+        };
+
         Ok(self.next_turn())
     }
 
@@ -151,11 +193,12 @@ impl Position {
         self.castle_rights = (self.castle_rights.1, self.castle_rights.0);
         self.state = State::Playing;
 
-        self.state
-
         // TODO: New state
+        todo!("new state, checks")
     }
 }
+
+// -------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PositionErr {
@@ -164,6 +207,8 @@ pub enum PositionErr {
     KingsTooClose,
     BothPlayersHaveChecks,
 }
+
+// -------------
 
 #[derive(Debug, Clone)]
 pub struct PositionBuilder {
@@ -183,137 +228,99 @@ impl Default for PositionBuilder {
 
 impl PositionBuilder {
     pub fn is_valid(&self) -> Result<(Coord, Coord), PositionErr> {
-        // Validate kings
+        // Kings
+        let mut white_king = None;
+        let mut black_king = None;
+
         let iter = self
             .board
-            .iter()
-            .filter_map(|(square, coord)| {
-                square.piece().map(|(piece, color)| (piece, color, coord))
-            })
-            .filter_map(|(piece, color, coord)| (piece == Piece::King).then_some((color, coord)));
+            .iter(Coord::default())
+            .filter(|(square, _)| square.piece_kind() == Some(Piece::King));
 
-        let mut kings = (None, None);
-
-        for (color, coord) in iter {
-            let king = match color {
-                Color::White => &mut kings.0,
-                Color::Black => &mut kings.1,
+        for (square, coord) in iter {
+            let king = match square.player().unwrap() {
+                Color::White => &mut white_king,
+                Color::Black => &mut black_king,
             };
 
-            if king.replace(coord).is_some() {
+            if king.replace((square, coord)).is_some() {
                 return Err(PositionErr::InvalidAmountOfKings);
             }
         }
 
-        let kings = (
-            kings.0.ok_or(PositionErr::InvalidAmountOfKings)?,
-            kings.1.ok_or(PositionErr::InvalidAmountOfKings)?,
-        );
-
-        // Pawns on first rank
-        let pawns_exist = self
-            .board
-            .iter()
-            .filter(|(_, coord)| matches!(coord.rank, 0 | 7))
-            .filter_map(|(square, _)| square.piece())
-            .any(|(piece, _)| piece == Piece::Pawn);
-
-        if pawns_exist {
-            return Err(PositionErr::PawnsOnFirstRank);
-        }
+        let white_king = white_king.ok_or(PositionErr::InvalidAmountOfKings)?;
+        let black_king = black_king.ok_or(PositionErr::InvalidAmountOfKings)?;
 
         // Kings too close
-        let (dx, dy) = (
-            kings.1.file.abs_diff(kings.0.file),
-            kings.1.rank.abs_diff(kings.1.file),
+        let (dy, dx) = (
+            white_king.1.row.abs_diff(black_king.1.row),
+            white_king.1.col.abs_diff(black_king.1.col),
         );
 
         if dx <= 1 || dy <= 1 {
             return Err(PositionErr::KingsTooClose);
         }
 
-        // TODO: Passant
-        // TODO: Checks
-        let checks: Vec<_> = all_moves(&self.board)
-            .filter(|(.., shape)| *shape == MoveShape::MoveAndAttack)
-            .filter(|(_, (_, target_coord), _)| {
-                *target_coord == kings.0 || *target_coord == kings.1
-            })
-            .map(|(origin, target, _)| (origin, target))
-            .collect();
+        // Pawns on first rank
+        let invalid_pawns = self
+            .board
+            .iter(Coord::default())
+            .filter(|(_, coord)| matches!(coord.row, 0 | 7))
+            .any(|(square, _)| square.piece_kind() == Some(Piece::Pawn));
 
-        let mut check_test = (false, false);
-
-        for ((origin_square, _), ..) in checks.iter() {
-            let player = origin_square.player().unwrap();
-
-            let test = match player {
-                Color::White => check_test.0 = true,
-                Color::Black => check_test.1 = true,
-            };
-
-            if check_test.0 && check_test.1 {
-                break;
-            }
+        if invalid_pawns {
+            return Err(PositionErr::PawnsOnFirstRank);
         }
 
-        if check_test.0 && check_test.1 {
-            return Err(PositionErr::BothPlayersHaveChecks);
-        }
+        // Checks
+        let checks_white: Vec<_> = iter_defenders(&self.board, white_king).collect();
+        let checks_black: Vec<_> = iter_defenders(&self.board, black_king).collect();
 
-        Ok(kings)
+        // TODO: Do something with checks
+        if !checks_white.is_empty() && !checks_black.is_empty() {}
+
+        todo!("checks")
     }
 
     pub fn try_build(self) -> Result<Position, PositionErr> {
         self.is_valid()?;
 
-        Err(PositionErr::InvalidAmountOfKings)
+        unimplemented!()
     }
 }
 
-impl TryInto<Position> for PositionBuilder {
-    type Error = PositionErr;
-    fn try_into(self) -> Result<Position, PositionErr> {
-        self.try_build()
-    }
-}
+// -------------
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, PartialOrd, Ord)]
-pub enum MoveShape {
-    OnlyMove,
-    MoveAndAttack,
-    NoMove,
-}
-
-fn move_shape(piece: (Piece, Color), origin_coord: Coord, target_coord: Coord) -> MoveShape {
+// TODO: Is this code good?
+fn move_shape(origin: (Square, Coord), target_coord: Coord) -> Option<MoveShape> {
     use {MoveShape::*, Piece::*};
 
+    let (origin_square, origin_coord) = origin;
+    let (origin_piece, origin_color) = origin_square.piece()?;
+
     let (dy, dx) = (
-        (target_coord.file - origin_coord.file) as i8,
-        (target_coord.rank - origin_coord.rank) as i8,
+        (target_coord.row - origin_coord.row) as i8,
+        (target_coord.col - origin_coord.col) as i8,
     );
 
-    let direction = match piece.1 {
-        Color::White => 1,
-        Color::Black => -1,
+    let (direction, row_2nd) = match origin_color {
+        Color::White => (1, 1),
+        Color::Black => (-1, 6),
     };
 
-    let rank_2nd = match piece.1 {
-        Color::White => 1,
-        Color::Black => 6,
-    };
-
-    match piece.0 {
+    let shape = match origin_piece {
         Pawn if dy == direction && dx == 0 => OnlyMove,
-        Pawn if origin_coord.rank == rank_2nd && dy == direction * 2 && dx == 0 => OnlyMove,
+        Pawn if origin_coord.row == row_2nd && dy == direction * 2 && dx == 0 => OnlyMove,
         Pawn if dy == direction && dx.abs() == 1 => MoveAndAttack,
         Rook if dx * dy == 0 => MoveAndAttack,
         King if dx.abs() <= 1 && dy.abs() <= 1 => MoveAndAttack,
         Queen if dx * dy == 0 || dx.abs() == dy.abs() => MoveAndAttack,
         Knight if dx.abs() * dy.abs() == 2 => MoveAndAttack,
         Bishop if dx.abs() == dy.abs() => MoveAndAttack,
-        _ => NoMove,
-    }
+        _ => return None,
+    };
+
+    Some(shape)
 }
 
 fn can_move(
@@ -334,7 +341,7 @@ fn can_move(
     }
 
     // Origin square must be non empty
-    let (origin_piece, origin_player) = origin_square.piece().ok_or(OriginSquareEmpty)?;
+    let (_, origin_player) = origin_square.piece().ok_or(OriginSquareEmpty)?;
 
     // Origin piece has to be owned by player
     if origin_player != player {
@@ -346,181 +353,168 @@ fn can_move(
         return Err(OwnsTargetPiece);
     }
 
-    let move_shape = move_shape((origin_piece, origin_player), origin_coord, target_coord);
+    let move_shape = move_shape((origin_square, origin_coord), target_coord);
 
     match move_shape {
-        MoveShape::NoMove => return Err(InvalidMoveShape),
-        MoveShape::OnlyMove if target_square != Square::Empty => return Err(InvalidMoveShape),
+        None => return Err(InvalidMoveShape),
+        Some(MoveShape::OnlyMove) if target_square != Square::Empty => {
+            return Err(InvalidMoveShape)
+        }
         _ => {}
     }
 
     // Path must be empty
-    if !is_path_clear(board, origin_coord, target_coord) {
-        return Err(PathNotEmpty);
-    }
+    //if !is_path_between_clear(board, origin_coord, target_coord) {
+    //    return Err(PathNotEmpty);
+    //}
 
-    // TODO: Checks
+    todo!("checks")
+}
+// -------------
 
-    // TODO: En passant
-
-    Ok((origin_square, target_square, move_shape))
+// TODO: Optimise
+fn iter_defenders(board: &Board, origin: (Square, Coord)) -> impl Iterator<Item = Move> + '_ {
+    pawn_moves(board, origin)
+        .into_iter()
+        .flatten()
+        .chain(king_moves(board, origin).into_iter().flatten())
+        .chain(rook_moves(board, origin).into_iter().flatten())
+        .chain(queen_moves(board, origin).into_iter().flatten())
+        .chain(bishop_moves(board, origin).into_iter().flatten())
+        .chain(knight_moves(board, origin).into_iter().flatten())
+        .filter(|mov| mov.shape == MoveShape::MoveAndAttack)
+        .filter(move |mov| mov.target.1 == origin.1)
 }
 
-enum MoveType {
-    AttackAndMove,
-    Move,
-}
+fn pawn_moves(board: &Board, origin: (Square, Coord)) -> Option<impl Iterator<Item = Move> + '_> {
+    let (square, coord) = origin;
+    let player = square.player()?;
 
-// TODO: Optimise to iterate over board once
-#[inline(always)]
-fn all_moves(
-    board: &Board,
-) -> impl Iterator<Item = ((Square, Coord), (Square, Coord), MoveShape)> + '_ {
-    queen_moves(board)
-        .chain(knight_moves(board))
-        .chain(bishop_moves(board))
-        .chain(king_moves(board))
-        .chain(rook_moves(board))
-        .map(|(origin, target)| (origin, target, MoveShape::MoveAndAttack))
-        .chain(pawn_moves(board))
-}
+    let (direction, row_2nd) = match player {
+        Color::White => (1, 1),
+        Color::Black => (-1, 6),
+    };
 
-// TODO: Feed iterator of piece locations prior
-#[inline(always)]
-fn pawn_moves(
-    board: &Board,
-) -> impl Iterator<Item = ((Square, Coord), (Square, Coord), MoveShape)> + '_ {
-    iter_piece(board, Piece::Pawn).flat_map(move |(origin_square, origin_coord)| {
-        let player = origin_square.player().unwrap();
+    // move upwards
+    let move_1_up = iter_square(board, increment_coord(coord, (direction, 0)));
+    let move_2_up = iter_square(board, increment_coord(coord, (direction * 2, 0)))
+        .filter(move |(_, coord)| coord.row == row_2nd);
 
-        let direction = match player {
-            Color::White => 1,
-            Color::Black => -1,
-        };
+    let moves = move_1_up.chain(move_2_up).map(move |target| Move {
+        origin,
+        target,
+        shape: MoveShape::OnlyMove,
+    });
 
-        let rank_2nd = match player {
-            Color::White => 1,
-            Color::Black => 6,
-        };
+    // attack diagonally
+    let move_atk_left = iter_square(board, increment_coord(coord, (direction, 1)));
+    let move_atk_right = iter_square(board, increment_coord(coord, (direction, -1)));
 
-        // move upwards
-        let coord_1_up = increment_coord(origin_coord, (direction, 0));
-        let move_1_up = board.square(coord_1_up).zip(Some(coord_1_up));
-
-        let coord_2_up = increment_coord(origin_coord, (direction * 2, 0));
-        let move_2_up = (origin_coord.rank == rank_2nd)
-            .then_some(board.square(coord_2_up).zip(Some(coord_2_up)))
-            .flatten();
-
-        let moves = move_1_up
-            .into_iter()
-            .chain(move_2_up.into_iter())
-            .zip(iter::repeat(MoveShape::OnlyMove));
-
-        // attack diagonally
-        let coord_atk_left = increment_coord(origin_coord, (direction, -1));
-        let move_atk_left = board.square(coord_atk_left).zip(Some(coord_atk_left));
-
-        let coord_atk_right = increment_coord(origin_coord, (direction, 1));
-        let move_atk_right = board.square(coord_atk_right).zip(Some(coord_atk_right));
-
-        let attacks = move_atk_left
-            .into_iter()
-            .chain(move_atk_right.into_iter())
-            .zip(iter::repeat(MoveShape::MoveAndAttack));
-
-        moves
-            .chain(attacks)
-            .map(move |(target, shape)| ((origin_square, origin_coord), target, shape))
-    })
-}
-
-#[inline(always)]
-fn king_moves(board: &Board) -> impl Iterator<Item = ((Square, Coord), (Square, Coord))> + '_ {
-    iter_piece(board, Piece::King).flat_map(move |(origin_square, origin_coord)| {
-        let rank = -1..=1;
-        let file = -1..=1;
-
-        let combinations = file
-            .flat_map(move |i| rank.clone().map(move |j| (i, j)))
-            .filter(|(i, j)| *i != 0 && *j != 0);
-
-        let paths = combinations.filter_map(move |increment| {
-            let target_coord = increment_coord(origin_coord, increment);
-            board.square(target_coord).zip(Some(target_coord))
+    let attacks = move_atk_left
+        .chain(move_atk_right)
+        .filter(move |(square, _)| square.player().filter(|p| *p != player).is_some())
+        .map(move |target| Move {
+            origin,
+            target,
+            shape: MoveShape::MoveAndAttack,
         });
 
-        iter::repeat((origin_square, origin_coord)).zip(paths)
-    })
+    Some(moves.chain(attacks))
 }
 
-#[inline(always)]
-fn knight_moves(board: &Board) -> impl Iterator<Item = ((Square, Coord), (Square, Coord))> + '_ {
-    iter_piece(board, Piece::Knight).flat_map(move |(origin_square, origin_coord)| {
-        let rank = (-2..=1).chain(1..=2);
-        let file = (-2..=1).chain(1..=2);
+fn king_moves(board: &Board, origin: (Square, Coord)) -> Option<impl Iterator<Item = Move> + '_> {
+    let (_, coord) = origin;
 
-        let combinations = file.flat_map(move |i| rank.clone().map(move |j| (i, j)));
-        let paths = combinations.filter_map(move |increment| {
-            let target_coord = increment_coord(origin_coord, increment);
-            board.square(target_coord).zip(Some(target_coord))
-        });
+    let paths = iter_square(board, increment_coord(coord, (1, 1)))
+        .chain(iter_square(board, increment_coord(coord, (1, 0))))
+        .chain(iter_square(board, increment_coord(coord, (1, -1))))
+        .chain(iter_square(board, increment_coord(coord, (0, 1))))
+        .chain(iter_square(board, increment_coord(coord, (0, -1))))
+        .chain(iter_square(board, increment_coord(coord, (-1, 1))))
+        .chain(iter_square(board, increment_coord(coord, (-1, 0))))
+        .chain(iter_square(board, increment_coord(coord, (-1, -1))));
 
-        iter::repeat((origin_square, origin_coord)).zip(paths)
-    })
+    Some(paths.map(move |target| Move {
+        origin,
+        target,
+        shape: MoveShape::MoveAndAttack,
+    }))
 }
 
-#[inline(always)]
-fn queen_moves(board: &Board) -> impl Iterator<Item = ((Square, Coord), (Square, Coord))> + '_ {
-    iter_piece(board, Piece::Queen).flat_map(|(origin_square, origin_coord)| {
-        let player = origin_square.player().unwrap();
+fn knight_moves(board: &Board, origin: (Square, Coord)) -> Option<impl Iterator<Item = Move> + '_> {
+    let (_, coord) = origin;
 
-        let bishop_paths = iter_path(board, player, origin_coord, (1, 1))
-            .chain(iter_path(board, player, origin_coord, (1, -1)))
-            .chain(iter_path(board, player, origin_coord, (-1, 1)))
-            .chain(iter_path(board, player, origin_coord, (-1, -1)));
+    let paths = iter_square(board, increment_coord(coord, (2, 1)))
+        .chain(iter_square(board, increment_coord(coord, (2, -1))))
+        .chain(iter_square(board, increment_coord(coord, (1, 2))))
+        .chain(iter_square(board, increment_coord(coord, (1, -2))))
+        .chain(iter_square(board, increment_coord(coord, (-1, 2))))
+        .chain(iter_square(board, increment_coord(coord, (-1, -2))))
+        .chain(iter_square(board, increment_coord(coord, (-2, 1))))
+        .chain(iter_square(board, increment_coord(coord, (-2, -1))));
 
-        let rook_paths = iter_path(board, player, origin_coord, (1, 0))
-            .chain(iter_path(board, player, origin_coord, (-1, 0)))
-            .chain(iter_path(board, player, origin_coord, (0, 1)))
-            .chain(iter_path(board, player, origin_coord, (0, -1)));
-
-        let paths = bishop_paths.chain(rook_paths);
-
-        iter::repeat((origin_square, origin_coord)).zip(paths)
-    })
+    Some(paths.map(move |target| Move {
+        origin,
+        target,
+        shape: MoveShape::MoveAndAttack,
+    }))
 }
 
-#[inline(always)]
-fn bishop_moves(board: &Board) -> impl Iterator<Item = ((Square, Coord), (Square, Coord))> + '_ {
-    iter_piece(board, Piece::Bishop).flat_map(|(origin_square, origin_coord)| {
-        let player = origin_square.player().unwrap();
+fn queen_moves(board: &Board, origin: (Square, Coord)) -> Option<impl Iterator<Item = Move> + '_> {
+    let (square, coord) = origin;
+    let player = square.player()?;
 
-        let paths = iter_path(board, player, origin_coord, (1, 1))
-            .chain(iter_path(board, player, origin_coord, (1, -1)))
-            .chain(iter_path(board, player, origin_coord, (-1, 1)))
-            .chain(iter_path(board, player, origin_coord, (-1, -1)));
+    let paths = iter_attack_path(board, player, coord, (1, 1))
+        .chain(iter_attack_path(board, player, coord, (1, -1)))
+        .chain(iter_attack_path(board, player, coord, (-1, 1)))
+        .chain(iter_attack_path(board, player, coord, (-1, -1)))
+        .chain(iter_attack_path(board, player, coord, (1, 0)))
+        .chain(iter_attack_path(board, player, coord, (0, 1)))
+        .chain(iter_attack_path(board, player, coord, (0, -1)))
+        .chain(iter_attack_path(board, player, coord, (-1, -1)));
 
-        iter::repeat((origin_square, origin_coord)).zip(paths)
-    })
+    Some(paths.map(move |target| Move {
+        origin,
+        target,
+        shape: MoveShape::MoveAndAttack,
+    }))
 }
 
-#[inline(always)]
-fn rook_moves(board: &Board) -> impl Iterator<Item = ((Square, Coord), (Square, Coord))> + '_ {
-    iter_piece(board, Piece::Rook).flat_map(|(origin_square, origin_coord)| {
-        let player = origin_square.player().unwrap();
+fn bishop_moves(board: &Board, origin: (Square, Coord)) -> Option<impl Iterator<Item = Move> + '_> {
+    let (square, coord) = origin;
+    let player = square.player()?;
 
-        let paths = iter_path(board, player, origin_coord, (1, 0))
-            .chain(iter_path(board, player, origin_coord, (-1, 0)))
-            .chain(iter_path(board, player, origin_coord, (0, 1)))
-            .chain(iter_path(board, player, origin_coord, (0, -1)));
+    let paths = iter_attack_path(board, player, coord, (1, 1))
+        .chain(iter_attack_path(board, player, coord, (1, -1)))
+        .chain(iter_attack_path(board, player, coord, (-1, 1)))
+        .chain(iter_attack_path(board, player, coord, (-1, -1)));
 
-        iter::repeat((origin_square, origin_coord)).zip(paths)
-    })
+    Some(paths.map(move |target| Move {
+        origin,
+        target,
+        shape: MoveShape::MoveAndAttack,
+    }))
 }
 
-#[inline(always)]
-fn iter_path(
+fn rook_moves(board: &Board, origin: (Square, Coord)) -> Option<impl Iterator<Item = Move> + '_> {
+    let (square, coord) = origin;
+    let player = square.player()?;
+
+    let paths = iter_attack_path(board, player, coord, (1, 0))
+        .chain(iter_attack_path(board, player, coord, (-1, 0)))
+        .chain(iter_attack_path(board, player, coord, (0, 1)))
+        .chain(iter_attack_path(board, player, coord, (0, -1)));
+
+    Some(paths.map(move |target| Move {
+        origin,
+        target,
+        shape: MoveShape::MoveAndAttack,
+    }))
+}
+
+// -------------
+
+fn iter_attack_path(
     board: &Board,
     player: Color,
     coord: Coord,
@@ -529,7 +523,7 @@ fn iter_path(
     let mut enemy_found = false;
 
     board
-        .path_iter(coord, increment)
+        .iter_path(coord, increment)
         .skip(1)
         .take_while(move |(square, _)| match *square {
             Square::Empty => true,
@@ -541,38 +535,13 @@ fn iter_path(
         })
 }
 
-#[inline(always)]
-fn iter_piece(board: &Board, target: Piece) -> impl Iterator<Item = (Square, Coord)> + '_ {
-    board
-        .iter()
-        .filter(move |(square, _)| square.piece_kind() == Some(target))
-}
-
-#[inline(always)]
-fn iter_pieces(board: &Board) -> impl Iterator<Item = (Square, Coord)> + '_ {
-    board
-        .iter()
-        .filter(|(square, _)| square.piece_kind().is_some())
-}
-
-// TODO: Rewrite
-fn is_path_clear(board: &Board, origin_coord: Coord, target_coord: Coord) -> bool {
-    let increment = (
-        (target_coord.file as i8 - origin_coord.file as i8).signum(),
-        (target_coord.rank as i8 - origin_coord.rank as i8).signum(),
-    );
-
-    // Ensure all squares are empty
-    board
-        .path_iter(origin_coord, increment)
-        .skip(1)
-        .take_while(|(_, coord)| coord.file != target_coord.file && coord.rank != target_coord.rank)
-        .all(|(square, _)| square == Square::Empty)
+fn iter_square(board: &Board, coord: Coord) -> impl Iterator<Item = (Square, Coord)> {
+    board.square(coord).zip(Some(coord)).into_iter()
 }
 
 fn increment_coord(coord: Coord, increment: (i8, i8)) -> Coord {
     Coord {
-        file: coord.file.wrapping_add_signed(increment.0),
-        rank: coord.rank.wrapping_add_signed(increment.1),
+        row: coord.row.wrapping_add_signed(increment.0),
+        col: coord.col.wrapping_add_signed(increment.1),
     }
 }
