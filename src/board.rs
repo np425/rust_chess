@@ -78,6 +78,10 @@ impl Default for Board {
 }
 
 impl Board {
+    pub fn make(pieces: [Square; 64]) -> Self {
+        Self { pieces }
+    }
+
     pub fn square(&self, coord: Coord) -> Option<Square> {
         self.pieces.get(Self::resolve_index(coord)).copied()
     }

@@ -58,6 +58,10 @@ pub struct Move {
 
 // -------------
 
+pub const STANDARD_BOARD: Board = Board::make([Square::default(); 64]);
+
+// -------------
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Position {
     board: Board,
@@ -195,6 +199,21 @@ impl Position {
 
         // TODO: New state
         todo!("new state, checks")
+    }
+}
+
+impl Default for Position {
+    fn default() -> Self {
+        use {Color::*, Piece::*};
+
+        Self {
+            board: Board::make([Square::Piece(Pawn, White), ..Square::Empty]),
+            to_play: White,
+            castle_rights: (CastleRights::default(), CastleRights::default()),
+            king_coord: (Coord::default(), Coord::default()),
+            checks: Vec::new(),
+            state: State::Playing,
+        }
     }
 }
 
