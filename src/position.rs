@@ -60,19 +60,24 @@ pub struct Move {
 
 use {Color::*, Piece::*};
 
-pub const STANDARD_BOARD: Board = Board::default()
-    .put_row(
-        0,
-        White,
-        [Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook],
-    )
-    .put_row(1, White, [Pawn; 8])
-    .put_row(6, Black, [Pawn; 8])
-    .put_row(
-        7,
-        Black,
-        [Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook],
-    );
+#[inline]
+pub fn standard_board() -> Board {
+    let mut board = Board::default();
+    board
+        .put_row(
+            0,
+            White,
+            [Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook],
+        )
+        .put_row(1, White, [Pawn; 8])
+        .put_row(6, Black, [Pawn; 8])
+        .put_row(
+            7,
+            Black,
+            [Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook],
+        );
+    board
+}
 
 // -------------
 
@@ -219,7 +224,7 @@ impl Position {
 impl Default for Position {
     fn default() -> Self {
         Self {
-            board: STANDARD_BOARD,
+            board: standard_board(),
             to_play: Color::White,
             checks: vec![],
             state: State::Playing,
@@ -274,7 +279,7 @@ impl PositionBuilder {
     pub fn standard() -> Self {
         Self {
             to_play: Color::White,
-            board: STANDARD_BOARD,
+            board: standard_board(),
         }
     }
 

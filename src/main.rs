@@ -4,11 +4,26 @@ pub mod position;
 use board::*;
 use position::*;
 
-fn display_board(board: &Board) {
-    let iter = board.iter(Coord::default());
+fn incr_char(chr1: char, incr: u8) -> char {
+    ((chr1 as u8) + incr) as char
+}
 
-    for _row in 0..8 {
-        for (square, _) in iter {
+fn display_board(board: &Board, _perspective: Color) {
+    print!(" | ");
+    for row in 0..8 {
+        print!("{} ", incr_char('A', row))
+    }
+    print!("| ");
+    println!();
+    println!("---------------------");
+
+    // reversed to put white at bottom
+    for row in (0..8).rev() {
+        print!("{}| ", row + 1);
+
+        for col in 0..8 {
+            let square = board.square_unchecked(Coord::make(row, col));
+
             let mut chr = match square.piece_kind() {
                 None => ' ',
                 Some(Piece::Pawn) => 'p',
@@ -23,16 +38,23 @@ fn display_board(board: &Board) {
                 chr = chr.to_ascii_uppercase();
             }
 
-            print!("{}", chr);
+            print!("{} ", chr);
         }
+        print!("|{}", row + 1);
 
         println!();
     }
+
+    println!("---------------------");
+    print!(" | ");
+    for row in 0..8 {
+        print!("{} ", incr_char('A', row))
+    }
+    print!("| ");
+    println!();
 }
 
 fn main() {
     let pos = Position::default();
-    display_board(pos.board());
-
-    unimplemented!();
+    display_board(pos.board(), pos.to_play());
 }

@@ -91,10 +91,9 @@ impl Board {
         &mut self.pieces[coord.row as usize][coord.col as usize]
     }
 
-    pub fn put_row(mut self, row: u8, color: Color, pieces: [Piece; 8]) -> Self {
-        for col in 0..8 {
-            self.pieces[row as usize][col] = Square::Piece(pieces[col], color);
-        }
+    pub fn put_row(&mut self, row: u8, color: Color, pieces: [Piece; 8]) -> &mut Self {
+        let squares = pieces.map(|piece| Square::Piece(piece, color));
+        self.pieces[row as usize] = squares;
         self
     }
 
