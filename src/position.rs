@@ -58,7 +58,21 @@ pub struct Move {
 
 // -------------
 
-pub const STANDARD_BOARD: Board = Board::make([Square::default(); 64]);
+use {Color::*, Piece::*};
+
+pub const STANDARD_BOARD: Board = Board::default()
+    .put_row(
+        0,
+        White,
+        [Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook],
+    )
+    .put_row(1, White, [Pawn; 8])
+    .put_row(6, Black, [Pawn; 8])
+    .put_row(
+        7,
+        Black,
+        [Rook, Knight, Bishop, Queen, King, Bishop, Knight, Rook],
+    );
 
 // -------------
 
@@ -204,15 +218,22 @@ impl Position {
 
 impl Default for Position {
     fn default() -> Self {
-        use {Color::*, Piece::*};
-
         Self {
-            board: Board::make([Square::Piece(Pawn, White), ..Square::Empty]),
-            to_play: White,
-            castle_rights: (CastleRights::default(), CastleRights::default()),
-            king_coord: (Coord::default(), Coord::default()),
-            checks: Vec::new(),
+            board: STANDARD_BOARD,
+            to_play: Color::White,
+            checks: vec![],
             state: State::Playing,
+            king_coord: (Coord::make(0, 3), Coord::make(7, 3)),
+            castle_rights: (
+                CastleRights {
+                    king: true,
+                    queen: true,
+                },
+                CastleRights {
+                    king: true,
+                    queen: true,
+                },
+            ),
         }
     }
 }
@@ -238,14 +259,25 @@ pub struct PositionBuilder {
 // TODO: Default board setup
 impl Default for PositionBuilder {
     fn default() -> Self {
+        Self::empty()
+    }
+}
+
+impl PositionBuilder {
+    pub fn empty() -> Self {
         Self {
             to_play: Color::White,
             board: Board::default(),
         }
     }
-}
 
-impl PositionBuilder {
+    pub fn standard() -> Self {
+        Self {
+            to_play: Color::White,
+            board: STANDARD_BOARD,
+        }
+    }
+
     /// TODO: Refactor
     pub fn is_valid(&self) -> Result<(Coord, Coord), PositionErr> {
         // Kings

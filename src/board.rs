@@ -64,38 +64,38 @@ impl Coord {
 
 // -------------
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Board {
-    pieces: [Square; 64],
-}
-
-impl Default for Board {
-    fn default() -> Self {
-        Self {
-            pieces: [Square::default(); 64],
-        }
-    }
+    pieces: [[Square; 8]; 8],
 }
 
 impl Board {
-    pub fn make(pieces: [Square; 64]) -> Self {
-        Self { pieces }
-    }
-
     pub fn square(&self, coord: Coord) -> Option<Square> {
-        self.pieces.get(Self::resolve_index(coord)).copied()
+        self.pieces
+            .get(coord.row as usize)?
+            .get(coord.col as usize)
+            .copied()
     }
 
     pub fn square_mut(&mut self, coord: Coord) -> Option<&mut Square> {
-        self.pieces.get_mut(Self::resolve_index(coord))
+        self.pieces
+            .get_mut(coord.row as usize)?
+            .get_mut(coord.col as usize)
     }
 
     pub fn square_unchecked(&self, coord: Coord) -> Square {
-        self.pieces[Self::resolve_index(coord)]
+        self.pieces[coord.row as usize][coord.col as usize]
     }
 
     pub fn square_unchecked_mut(&mut self, coord: Coord) -> &mut Square {
-        &mut self.pieces[Self::resolve_index(coord)]
+        &mut self.pieces[coord.row as usize][coord.col as usize]
+    }
+
+    pub fn put_row(mut self, row: u8, color: Color, pieces: [Piece; 8]) -> Self {
+        for col in 0..8 {
+            self.pieces[row as usize][col] = Square::Piece(pieces[col], color);
+        }
+        self
     }
 
     pub fn move_unchecked(&mut self, origin_coord: Coord, target_coord: Coord) -> (Square, Square) {
@@ -127,10 +127,6 @@ impl Board {
             coord: origin_coord,
             increment,
         }
-    }
-
-    fn resolve_index(coord: Coord) -> usize {
-        (coord.row * 8 + coord.col) as usize
     }
 }
 
